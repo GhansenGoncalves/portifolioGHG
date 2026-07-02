@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doce Pote · Gestão de Bolo no Pote</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">🍰</span>
+      <div>
+        <h1>Doce Pote</h1>
+        <p>Gestão de vendas de bolo no pote</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Seções do sistema">
+      <button class="tab active" role="tab" aria-selected="true" data-view="dashboard">Dashboard</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="vendas">Vendas</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="produtos">Produtos</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="promocoes">Promoções</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="dicas">Dicas</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============ DASHBOARD ============ -->
+    <section id="view-dashboard" class="view active" role="tabpanel">
+      <div class="filter-row" id="range-filters" aria-label="Período">
+        <span class="filter-label">Período:</span>
+        <button class="chip" data-days="1">Hoje</button>
+        <button class="chip" data-days="7">7 dias</button>
+        <button class="chip active" data-days="30">30 dias</button>
+        <button class="chip" data-days="90">90 dias</button>
+        <button class="chip" data-days="0">Tudo</button>
+      </div>
+
+      <div class="kpi-row" id="kpi-row"></div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h2>Receita por dia</h2>
+          <p class="card-sub" id="revenue-chart-sub"></p>
+          <div class="chart-wrap" id="revenue-chart"></div>
+          <details class="table-toggle">
+            <summary>Ver dados em tabela</summary>
+            <div class="mini-table-wrap" id="revenue-table"></div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h2>Top produtos por receita</h2>
+          <p class="card-sub" id="top-products-sub"></p>
+          <div id="top-products-chart" class="hbar-chart"></div>
+          <details class="table-toggle">
+            <summary>Ver dados em tabela</summary>
+            <div class="mini-table-wrap" id="top-products-table"></div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h2>Vendas por dia da semana</h2>
+          <p class="card-sub">Total de potes vendidos no período</p>
+          <div id="weekday-chart" class="col-chart"></div>
+          <details class="table-toggle">
+            <summary>Ver dados em tabela</summary>
+            <div class="mini-table-wrap" id="weekday-table"></div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h2>Formas de pagamento</h2>
+          <p class="card-sub">Participação na receita do período</p>
+          <div id="payment-chart"></div>
+          <details class="table-toggle">
+            <summary>Ver dados em tabela</summary>
+            <div class="mini-table-wrap" id="payment-table"></div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ VENDAS ============ -->
+    <section id="view-vendas" class="view" role="tabpanel">
+      <div class="grid-sale">
+        <article class="card">
+          <h2>Nova venda</h2>
+          <div class="sale-add-row">
+            <label class="field grow">
+              <span>Produto</span>
+              <select id="sale-product"></select>
+            </label>
+            <label class="field qty">
+              <span>Qtd.</span>
+              <input type="number" id="sale-qty" min="1" value="1">
+            </label>
+            <button class="btn" id="btn-add-cart">Adicionar</button>
+          </div>
+
+          <div id="cart-area">
+            <table class="table" id="cart-table">
+              <thead>
+                <tr><th>Item</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num">Desconto</th><th class="num">Subtotal</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p class="empty-msg" id="cart-empty">Nenhum item no carrinho.</p>
+          </div>
+
+          <div class="sale-footer">
+            <fieldset class="pay-methods">
+              <legend>Pagamento</legend>
+              <label><input type="radio" name="payment" value="Pix" checked> Pix</label>
+              <label><input type="radio" name="payment" value="Cartão"> Cartão</label>
+              <label><input type="radio" name="payment" value="Dinheiro"> Dinheiro</label>
+            </fieldset>
+            <div class="sale-totals">
+              <div class="line"><span>Subtotal</span><strong id="cart-subtotal">R$ 0,00</strong></div>
+              <div class="line discount"><span>Descontos</span><strong id="cart-discount">R$ 0,00</strong></div>
+              <div class="line total"><span>Total</span><strong id="cart-total">R$ 0,00</strong></div>
+              <button class="btn primary" id="btn-confirm-sale" disabled>Confirmar venda</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Histórico de vendas</h2>
+          <div class="card-actions">
+            <button class="btn ghost" id="btn-export-csv">Exportar CSV</button>
+          </div>
+          <div class="table-scroll">
+            <table class="table" id="sales-table">
+              <thead>
+                <tr><th>Data</th><th>Itens</th><th>Pagamento</th><th class="num">Desconto</th><th class="num">Total</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ PRODUTOS ============ -->
+    <section id="view-produtos" class="view" role="tabpanel">
+      <div class="grid-side">
+        <article class="card">
+          <h2 id="product-form-title">Novo produto</h2>
+          <form id="product-form">
+            <input type="hidden" id="product-id">
+            <label class="field"><span>Nome / sabor</span>
+              <input type="text" id="product-name" required maxlength="60" placeholder="Ex.: Ninho com Nutella"></label>
+            <label class="field"><span>Preço de venda (R$)</span>
+              <input type="number" id="product-price" required min="0.01" step="0.01"></label>
+            <label class="field"><span>Custo de produção (R$)</span>
+              <input type="number" id="product-cost" required min="0" step="0.01"></label>
+            <label class="field"><span>Estoque (potes prontos)</span>
+              <input type="number" id="product-stock" required min="0" step="1"></label>
+            <div class="form-actions">
+              <button type="submit" class="btn primary">Salvar</button>
+              <button type="button" class="btn ghost hidden" id="btn-cancel-edit">Cancelar edição</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Catálogo</h2>
+          <div class="table-scroll">
+            <table class="table" id="products-table">
+              <thead>
+                <tr><th>Produto</th><th class="num">Preço</th><th class="num">Custo</th><th class="num">Margem</th><th class="num">Estoque</th><th class="num">Vend. 30d</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ PROMOÇÕES ============ -->
+    <section id="view-promocoes" class="view" role="tabpanel">
+      <div class="grid-side">
+        <article class="card">
+          <h2 id="promo-form-title">Nova promoção</h2>
+          <form id="promo-form">
+            <input type="hidden" id="promo-id">
+            <label class="field"><span>Nome da promoção</span>
+              <input type="text" id="promo-name" required maxlength="60" placeholder="Ex.: Semana do Chocolate"></label>
+            <label class="field"><span>Produto</span>
+              <select id="promo-product"></select></label>
+            <div class="field-row">
+              <label class="field"><span>Tipo</span>
+                <select id="promo-type">
+                  <option value="percent">% de desconto</option>
+                  <option value="fixed">R$ de desconto</option>
+                </select></label>
+              <label class="field"><span>Valor</span>
+                <input type="number" id="promo-value" required min="0.01" step="0.01"></label>
+            </div>
+            <div class="field-row">
+              <label class="field"><span>Início</span>
+                <input type="date" id="promo-start" required></label>
+              <label class="field"><span>Fim</span>
+                <input type="date" id="promo-end" required></label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn primary">Salvar</button>
+              <button type="button" class="btn ghost hidden" id="btn-cancel-promo-edit">Cancelar edição</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Promoções cadastradas</h2>
+          <p class="card-sub">Promoções ativas são aplicadas automaticamente no carrinho.</p>
+          <div class="table-scroll">
+            <table class="table" id="promos-table">
+              <thead>
+                <tr><th>Promoção</th><th>Produto</th><th class="num">Desconto</th><th>Vigência</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ DICAS ============ -->
+    <section id="view-dicas" class="view" role="tabpanel">
+      <article class="card">
+        <h2>Dicas para o seu negócio</h2>
+        <p class="card-sub">Geradas automaticamente a partir dos seus dados de vendas, estoque e promoções.</p>
+        <div id="tips-list" class="tips-list"></div>
+      </article>
+      <article class="card">
+        <h2>Como evoluir o sistema</h2>
+        <p class="card-sub">Próximos passos sugeridos para profissionalizar a operação.</p>
+        <div id="roadmap-list" class="tips-list"></div>
+      </article>
+      <article class="card danger-zone">
+        <h2>Dados</h2>
+        <p class="card-sub">Os dados ficam salvos apenas neste navegador (localStorage).</p>
+        <button class="btn ghost" id="btn-reset-demo">Restaurar dados de demonstração</button>
+        <button class="btn ghost" id="btn-clear-data">Começar do zero (apagar tudo)</button>
+      </article>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
