@@ -1,5 +1,7 @@
 # 🍰 Bolos da Bru — Gestão de vendas de bolo no pote
 
+[![Testes E2E](https://github.com/GhansenGoncalves/portifolioGHG/actions/workflows/tests.yml/badge.svg)](https://github.com/GhansenGoncalves/portifolioGHG/actions/workflows/tests.yml)
+
 Sistema web completo para o dia a dia de uma loja de bolo no pote: dashboard
 com indicadores, vendas de **balcão**, **delivery** (com taxa de entrega) e
 **encomendas** (produção para data marcada), catálogo com controle de estoque,
@@ -20,6 +22,18 @@ Se preferir servir por HTTP:
 ```bash
 npm start   # sobe em http://127.0.0.1:4173
 ```
+
+## Telas
+
+| Dashboard | Vendas e encomendas |
+|---|---|
+| ![Dashboard com KPIs e gráficos](docs/screenshots/dashboard.png) | ![Fluxo de venda com painel de encomendas](docs/screenshots/vendas.png) |
+
+| Loja (visão do cliente) | Dicas geradas dos dados |
+|---|---|
+| ![Loja on-line com carrinho](docs/screenshots/loja.png) | ![Dicas de negócio](docs/screenshots/dicas.png) |
+
+O tema escuro segue a preferência do sistema: [ver screenshot](docs/screenshots/dashboard-dark.png).
 
 ## Funcionalidades
 
