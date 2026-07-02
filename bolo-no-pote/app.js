@@ -78,11 +78,17 @@ const db = {
 };
 
 function saveDB() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(db));
+  // Em ambientes que bloqueiam localStorage (sandbox), o app segue em memória.
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(db));
+  } catch { /* sem persistência */ }
 }
 
 function loadDB() {
-  const raw = localStorage.getItem(STORE_KEY);
+  let raw = null;
+  try {
+    raw = localStorage.getItem(STORE_KEY);
+  } catch { /* sem persistência */ }
   if (!raw) { seedDemoData(); saveDB(); return; }
   try {
     const data = JSON.parse(raw);
