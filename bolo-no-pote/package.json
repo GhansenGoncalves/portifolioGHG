@@ -1,0 +1,13 @@
+{
+  "name": "doce-pote",
+  "version": "1.0.0",
+  "description": "Sistema de gestão de vendas de bolo no pote — app web sem dependências, com suíte de testes E2E",
+  "private": true,
+  "scripts": {
+    "start": "node tests/server.js",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

@@ -10,6 +10,12 @@ automaticamente e dicas geradas a partir dos próprios dados.
 Não precisa instalar nada: abra o arquivo `index.html` em qualquer navegador
 moderno. Os dados ficam salvos no próprio navegador (localStorage).
 
+Se preferir servir por HTTP:
+
+```bash
+npm start   # sobe em http://127.0.0.1:4173
+```
+
 Na primeira abertura o sistema carrega **dados de demonstração** (90 dias de
 vendas simuladas) para o dashboard já nascer preenchido. Na aba **Dicas** você
 pode restaurar a demonstração ou apagar tudo e começar do zero com os seus
@@ -50,6 +56,24 @@ próprios produtos.
 
 ## Tecnologia
 
-HTML, CSS e JavaScript puros — sem dependências, sem build. Gráficos em SVG
-feitos à mão, paleta de cores validada para daltonismo e contraste, dados
-persistidos em localStorage.
+HTML, CSS e JavaScript puros — sem dependências de runtime, sem build.
+Gráficos em SVG feitos à mão, paleta de cores validada para daltonismo e
+contraste, dados persistidos em localStorage.
+
+## Testes automatizados
+
+Suíte E2E com [Playwright](https://playwright.dev) cobrindo os fluxos
+principais: dashboard e filtros, venda com promoção automática, validação de
+estoque, cancelamento com estorno de estoque, persistência após reload,
+exportação CSV, CRUD de produtos e promoções, dicas geradas dos dados,
+estado vazio e modo escuro.
+
+```bash
+npm install
+npx playwright install chromium   # primeira vez
+npm test
+```
+
+Cada teste roda em contexto isolado do navegador (localStorage limpo), então
+a aplicação sempre parte dos dados de demonstração — sem dependência de ordem
+entre testes.
