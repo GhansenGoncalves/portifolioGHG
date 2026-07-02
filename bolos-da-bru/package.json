@@ -1,7 +1,7 @@
 {
-  "name": "doce-pote",
+  "name": "bolos-da-bru",
   "version": "1.0.0",
-  "description": "Sistema de gestão de vendas de bolo no pote — app web sem dependências, com suíte de testes E2E",
+  "description": "Bolos da Bru — gestão de vendas de bolo no pote (balcão, delivery, encomendas e loja on-line), com suíte de testes E2E",
   "private": true,
   "scripts": {
     "start": "node tests/server.js",

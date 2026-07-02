@@ -1,14 +1,20 @@
-/* Testes E2E do Doce Pote.
+/* Testes E2E do Bolos da Bru.
    Cada teste roda em contexto isolado (localStorage limpo), então a aplicação
-   sempre parte dos dados de demonstração: 6 produtos, 90 dias de vendas e
-   2 promoções (uma ativa para "Ninho com Nutella", uma expirada). */
+   sempre parte dos dados de demonstração: 6 produtos, 90 dias de vendas nos
+   três canais, 4 encomendas abertas (1 atrasada) e 2 promoções (uma ativa
+   para "Ninho com Nutella", uma expirada). */
 "use strict";
 
 const { test, expect } = require("@playwright/test");
 
+const STORE_KEY = "bolosdabru-v1";
+
+/* Abre o app e carrega os dados de exemplo (o primeiro acesso começa vazio). */
 async function openApp(page) {
   await page.goto("/");
-  await expect(page.locator("#kpi-row .kpi")).toHaveCount(5);
+  await page.click("#btn-load-demo");
+  await expect(page.locator("#welcome-banner")).toBeHidden();
+  await expect(page.locator("#kpi-row .kpi")).toHaveCount(6);
 }
 
 async function goTo(page, view) {
@@ -36,17 +42,38 @@ async function stockOf(page, name) {
   return match ? Number(match[0]) : 0;
 }
 
+test.describe("Primeiro acesso", () => {
+  test("começa vazio, sem dados fictícios, e oferece dados de exemplo", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#welcome-banner")).toBeVisible();
+    await expect(page.locator("#kpi-row .kpi .value").first()).toHaveText("R$ 0,00");
+
+    await page.click("#btn-load-demo");
+    await expect(page.locator("#welcome-banner")).toBeHidden();
+    await expect(page.locator("#kpi-row .kpi .value").first()).not.toHaveText("R$ 0,00");
+  });
+
+  test("botão de cadastrar produtos leva direto ao formulário", async ({ page }) => {
+    await page.goto("/");
+    await page.click("#btn-goto-products");
+    await expect(page.locator("#view-produtos")).toBeVisible();
+    await expect(page.locator("#product-name")).toBeFocused();
+  });
+});
+
 test.describe("Dashboard", () => {
-  test("carrega KPIs e os quatro gráficos com dados de demonstração", async ({ page }) => {
+  test("carrega KPIs e os cinco gráficos com dados de demonstração", async ({ page }) => {
     await openApp(page);
     await expect(page.locator("#kpi-row .kpi .label")).toHaveText([
       "Receita", "Vendas", "Potes vendidos", "Ticket médio", "Lucro estimado",
+      "Encomendas abertas",
     ]);
     await expect(page.locator("#revenue-chart svg")).toBeVisible();
     expect(await page.locator("#top-products-chart .hbar-row").count()).toBeGreaterThan(0);
     await expect(page.locator("#weekday-chart .col-slot")).toHaveCount(7);
     expect(await page.locator("#payment-chart .stack-seg").count()).toBeGreaterThan(0);
-    // Legenda presente na barra de pagamentos (múltiplas séries)
+    expect(await page.locator("#channel-chart .stack-seg").count()).toBeGreaterThan(1);
+    // Legenda presente nas barras de participação (múltiplas séries)
     expect(await page.locator("#payment-chart .legend .key").count()).toBeGreaterThan(1);
   });
 
@@ -85,22 +112,23 @@ test.describe("Fluxo de venda", () => {
     await page.click("#btn-add-cart");
 
     await expect(page.locator("#cart-table tbody tr")).toHaveCount(1);
-    await expect(page.locator(".promo-tag")).toContainText("Semana do Ninho");
+    await expect(page.locator("#cart-table .promo-tag")).toContainText("Semana do Ninho");
     await expect(page.locator("#cart-discount")).toHaveText("−R$ 3,40");
     await expect(page.locator("#cart-total")).toHaveText("R$ 30,60");
 
     // O histórico na tela é limitado às 100 vendas mais recentes; a inserção
     // é conferida direto nos dados persistidos.
     const countSales = () => page.evaluate(
-      () => JSON.parse(localStorage.getItem("docepote-v1")).sales.length,
+      (key) => JSON.parse(localStorage.getItem(key)).sales.length, STORE_KEY,
     );
     const salesBefore = await countSales();
     await page.click("#btn-confirm-sale");
     await expect(page.locator("#toast")).toContainText("Venda registrada: R$ 30,60");
     expect(await countSales()).toBe(salesBefore + 1);
-    await expect(
-      page.locator("#sales-table tbody tr", { hasText: "2× Ninho com Nutella" }).first(),
-    ).toContainText("−R$ 3,40");
+    // O total do histórico já vem líquido do desconto (2 × R$ 17,00 − R$ 3,40)
+    const historyRow = page.locator("#sales-table tbody tr", { hasText: "2× Ninho com Nutella" }).first();
+    await expect(historyRow).toContainText("R$ 30,60");
+    await expect(historyRow).toContainText("Balcão");
     // Carrinho zera após a venda
     await expect(page.locator("#cart-empty")).toBeVisible();
   });
@@ -175,7 +203,128 @@ test.describe("Fluxo de venda", () => {
     const downloadPromise = page.waitForEvent("download");
     await page.click("#btn-export-csv");
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/^vendas-doce-pote-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(download.suggestedFilename()).toMatch(/^vendas-bolos-da-bru-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
+  test("delivery soma a taxa de entrega ao total e guarda o cliente", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "vendas");
+    await page.check('input[name="channel"][value="delivery"]');
+    await page.fill("#sale-customer", "Mariana Prado");
+    await page.fill("#sale-address", "Rua das Flores, 12 — Centro");
+    await page.fill("#sale-fee", "7");
+    // Cenoura com Chocolate (R$ 13,00, sem promoção) + taxa R$ 7,00
+    await pickProduct(page, "Cenoura com Chocolate");
+    await page.click("#btn-add-cart");
+    await expect(page.locator("#fee-line")).toBeVisible();
+    await expect(page.locator("#cart-fee")).toHaveText("R$ 7,00");
+    await expect(page.locator("#cart-total")).toHaveText("R$ 20,00");
+
+    await page.click("#btn-confirm-sale");
+    await expect(page.locator("#toast")).toContainText("Venda registrada: R$ 20,00");
+    const row = page.locator("#sales-table tbody tr", { hasText: "Mariana Prado" }).first();
+    await expect(row).toContainText("Delivery");
+    await expect(row).toContainText("R$ 20,00");
+  });
+
+  test("delivery exige cliente e endereço", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "vendas");
+    await page.check('input[name="channel"][value="delivery"]');
+    await pickProduct(page, "Cenoura com Chocolate");
+    await page.click("#btn-add-cart");
+    await page.click("#btn-confirm-sale");
+    await expect(page.locator("#toast")).toContainText("Informe o cliente e o endereço");
+  });
+});
+
+test.describe("Encomendas", () => {
+  test("encomenda aceita sabor esgotado, fica pendente e vira receita ao concluir", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "vendas");
+    await page.check('input[name="channel"][value="encomenda"]');
+    // Maracujá está esgotado no seed, mas encomenda é produção sob demanda
+    await pickProduct(page, "Maracujá");
+    await page.fill("#sale-qty", "3");
+    await page.click("#btn-add-cart");
+    await expect(page.locator("#cart-table tbody tr")).toHaveCount(1);
+
+    await page.fill("#sale-customer", "Dona Rosa");
+    await page.fill("#sale-phone", "(11) 91234-5678");
+    const dueDate = await page.locator("#sale-due-date").inputValue(); // amanhã, preenchido pelo app
+    await page.click("#btn-confirm-sale");
+    await expect(page.locator("#toast")).toContainText("Encomenda de Dona Rosa registrada");
+
+    const orderRow = page.locator("#orders-table tbody tr", { hasText: "Dona Rosa" });
+    await expect(orderRow).toContainText("3× Maracujá");
+
+    // Pendente não conta como receita; concluída, sim.
+    const revenue = (sales) => sales
+      .filter((s) => s.status === "ok")
+      .reduce((a, s) => a + s.items.reduce((x, it) => x + it.unitPrice * it.qty - it.discount, 0) + (s.deliveryFee || 0), 0);
+    const before = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)).sales.filter((s) => s.status === "pendente").length, STORE_KEY,
+    );
+    expect(before).toBeGreaterThan(0);
+
+    await orderRow.getByRole("button", { name: "Concluir" }).click();
+    await expect(page.locator("#toast")).toContainText("concluída e somada às vendas");
+    await expect(page.locator("#orders-table tbody tr", { hasText: "Dona Rosa" })).toHaveCount(0);
+    const status = await page.evaluate(
+      ([key, due]) => JSON.parse(localStorage.getItem(key)).sales
+        .find((s) => s.customer?.name === "Dona Rosa")?.status, [STORE_KEY, dueDate],
+    );
+    expect(status).toBe("ok");
+  });
+
+  test("encomenda não baixa o estoque pronto", async ({ page }) => {
+    await openApp(page);
+    const before = await stockOf(page, "Red Velvet");
+    await goTo(page, "vendas");
+    await page.check('input[name="channel"][value="encomenda"]');
+    await pickProduct(page, "Red Velvet");
+    await page.click("#btn-add-cart");
+    await page.fill("#sale-customer", "Cliente Teste");
+    await page.click("#btn-confirm-sale");
+    await expect(page.locator("#toast")).toContainText("Encomenda de Cliente Teste");
+    expect(await stockOf(page, "Red Velvet")).toBe(before);
+  });
+});
+
+test.describe("Loja (visão do cliente)", () => {
+  test("cliente monta pedido na loja e ele cai nas encomendas abertas", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "loja");
+
+    const ninhoCard = page.locator(".shop-item", { hasText: "Ninho com Nutella" });
+    await ninhoCard.getByRole("button", { name: /Adicionar um pote/ }).click();
+    await ninhoCard.getByRole("button", { name: /Adicionar um pote/ }).click();
+    await expect(ninhoCard.locator(".shop-qty")).toHaveText("2");
+    // Promoção ativa do seed aplicada no preço da loja: 2 × R$ 15,30
+    await expect(page.locator("#shop-total")).toHaveText("R$ 30,60");
+
+    await page.fill("#shop-name", "Beatriz Lima");
+    await page.fill("#shop-phone", "(11) 98765-4321");
+    await page.check('input[name="shop-fulfil"][value="entrega"]');
+    await page.fill("#shop-address", "Av. Brasil, 100 — Jardim América");
+    await page.click(".shop-submit");
+
+    await expect(page.locator("#shop-confirmation")).toContainText("Pedido enviado!");
+    await expect(page.locator("#shop-confirmation a")).toHaveAttribute("href", /wa\.me/);
+
+    await goTo(page, "vendas");
+    const orderRow = page.locator("#orders-table tbody tr", { hasText: "Beatriz Lima" });
+    await expect(orderRow).toContainText("2× Ninho com Nutella");
+    await expect(orderRow).toContainText("Av. Brasil, 100");
+  });
+
+  test("loja exige contato antes de enviar o pedido", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "loja");
+    await page.locator(".shop-item", { hasText: "Prestígio" })
+      .getByRole("button", { name: /Adicionar um pote/ }).click();
+    await page.click(".shop-submit");
+    await expect(page.locator("#toast")).toContainText("Informe seu nome e telefone");
   });
 });
 
@@ -233,7 +382,7 @@ test.describe("Promoções", () => {
     await goTo(page, "vendas");
     await pickProduct(page, "Cenoura com Chocolate"); // R$ 13,00 → 20% = R$ 2,60
     await page.click("#btn-add-cart");
-    await expect(page.locator(".promo-tag")).toContainText("Cenoura em dobro");
+    await expect(page.locator("#cart-table .promo-tag")).toContainText("Cenoura em dobro");
     await expect(page.locator("#cart-discount")).toHaveText("−R$ 2,60");
   });
 
@@ -258,6 +407,14 @@ test.describe("Dicas e dados", () => {
     expect(await page.locator("#roadmap-list .tip").count()).toBeGreaterThan(3);
   });
 
+  test("alerta encomenda atrasada e produção dos próximos dias", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "dicas");
+    // O seed traz a encomenda da Mariana com entrega ontem
+    await expect(page.locator("#tips-list .tip", { hasText: "está atrasada" })).toContainText("Mariana");
+    await expect(page.locator("#tips-list .tip", { hasText: "próximos 2 dias" })).toBeVisible();
+  });
+
   test("apagar tudo leva ao estado vazio e desabilita a venda", async ({ page }) => {
     await openApp(page);
     page.on("dialog", (d) => d.accept());
@@ -269,6 +426,24 @@ test.describe("Dicas e dados", () => {
     await expect(page.locator("#sale-product")).toBeDisabled();
     await goTo(page, "dashboard");
     await expect(page.locator("#kpi-row .kpi .value").first()).toHaveText("R$ 0,00");
+    await expect(page.locator("#welcome-banner")).toBeVisible();
+  });
+
+  test("WhatsApp configurado entra no link de pedido da loja", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "dicas");
+    await page.fill("#cfg-whatsapp", "5511999998888");
+    await page.click("#btn-save-config");
+    await expect(page.locator("#toast")).toContainText("WhatsApp da loja salvo");
+
+    await goTo(page, "loja");
+    await page.locator(".shop-item", { hasText: "Prestígio" })
+      .getByRole("button", { name: /Adicionar um pote/ }).click();
+    await page.fill("#shop-name", "Cliente WhatsApp");
+    await page.fill("#shop-phone", "(11) 90000-0000");
+    await page.click(".shop-submit");
+    await expect(page.locator("#shop-confirmation a"))
+      .toHaveAttribute("href", /wa\.me\/5511999998888/);
   });
 
   test("modo escuro segue a preferência do sistema", async ({ page }) => {

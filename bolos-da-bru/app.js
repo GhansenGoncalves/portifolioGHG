@@ -1,6 +1,6 @@
 /* ============================================================
-   Doce Pote — sistema de gestão de vendas de bolo no pote
-   Dados persistidos em localStorage; sem dependências externas.
+   Bolos da Bru — gestão de vendas de bolo no pote
+   Balcão, delivery e encomendas; dados em localStorage.
    ============================================================ */
 "use strict";
 
@@ -69,12 +69,15 @@ function toast(msg) {
 
 /* ---------- Persistência ---------- */
 
-const STORE_KEY = "docepote-v1";
+const STORE_KEY = "bolosdabru-v1";
+
+const CHANNEL_LABELS = { balcao: "Balcão", delivery: "Delivery", encomenda: "Encomenda" };
 
 const db = {
   products: [],
   sales: [],
   promos: [],
+  settings: { whatsapp: "" },
 };
 
 function saveDB() {
@@ -89,16 +92,16 @@ function loadDB() {
   try {
     raw = localStorage.getItem(STORE_KEY);
   } catch { /* sem persistência */ }
-  if (!raw) { seedDemoData(); saveDB(); return; }
+  // Primeiro acesso: o sistema começa vazio, pronto para os produtos reais.
+  // Dados de exemplo só entram se a pessoa pedir (botão na tela inicial).
+  if (!raw) return;
   try {
     const data = JSON.parse(raw);
     db.products = data.products || [];
     db.sales = data.sales || [];
     db.promos = data.promos || [];
-  } catch {
-    seedDemoData();
-    saveDB();
-  }
+    db.settings = Object.assign({ whatsapp: "" }, data.settings);
+  } catch { /* dados corrompidos: recomeça vazio */ }
 }
 
 /* ---------- Dados de demonstração ---------- */
@@ -138,6 +141,8 @@ function seedDemoData() {
   // Popularidade relativa de cada sabor no gerador de vendas.
   const popularity = { p1: 0.28, p2: 0.24, p3: 0.13, p4: 0.15, p5: 0.08, p6: 0.12 };
   const payments = ["Pix", "Pix", "Pix", "Cartão", "Cartão", "Dinheiro"];
+  const customerNames = ["Mariana", "Carla", "João Pedro", "Fernanda", "Rafael", "Dona Lúcia"];
+  const addresses = ["Centro", "Jardim América", "Vila Nova", "Santa Mônica"];
 
   db.sales = [];
   for (let back = 89; back >= 0; back--) {
@@ -173,6 +178,26 @@ function seedDemoData() {
           it.promoName = promo.name;
         }
       }
+      // Canal: maioria balcão, parte delivery (com taxa) e parte encomenda
+      // já concluída (entregue no próprio dia).
+      const chRand = rand();
+      let channel = "balcao", customer = null, deliveryFee = 0, deliveryDate = null;
+      if (chRand < 0.22) {
+        channel = "delivery";
+        customer = {
+          name: customerNames[Math.floor(rand() * customerNames.length)],
+          phone: "", address: addresses[Math.floor(rand() * addresses.length)],
+        };
+        deliveryFee = [5, 6, 7, 8][Math.floor(rand() * 4)];
+      } else if (chRand < 0.32) {
+        channel = "encomenda";
+        customer = {
+          name: customerNames[Math.floor(rand() * customerNames.length)],
+          phone: "", address: "",
+        };
+        deliveryDate = dateISO;
+        deliveryFee = rand() < 0.5 ? 5 : 0;
+      }
       const hour = String(9 + Math.floor(rand() * 11)).padStart(2, "0");
       const minute = String(Math.floor(rand() * 60)).padStart(2, "0");
       db.sales.push({
@@ -181,9 +206,39 @@ function seedDemoData() {
         time: `${hour}:${minute}`,
         payment: payments[Math.floor(rand() * payments.length)],
         status: "ok",
+        channel, customer, deliveryFee, deliveryDate,
         items,
       });
     }
+  }
+
+  // Encomendas ainda abertas: uma atrasada (para demonstrar o alerta),
+  // as demais nos próximos dias.
+  const pendingSeed = [
+    { name: "Mariana", phone: "(11) 98888-1234", address: "Jardim América", days: -1, itemDefs: [["p1", 6]], fee: 8 },
+    { name: "Seu João", phone: "(11) 97777-4321", address: "", days: 1, itemDefs: [["p2", 4], ["p6", 2]], fee: 0 },
+    { name: "Escola Sol Nascente", phone: "(11) 96666-0000", address: "Centro", days: 2, itemDefs: [["p4", 10]], fee: 12 },
+    { name: "Carla", phone: "(11) 95555-9090", address: "", days: 5, itemDefs: [["p1", 3], ["p3", 3]], fee: 0 },
+  ];
+  for (const o of pendingSeed) {
+    db.sales.push({
+      id: uid(),
+      dateISO: addDays(today, Math.min(o.days, 0) - 2),
+      time: "10:00",
+      payment: "Pix",
+      status: "pendente",
+      channel: "encomenda",
+      customer: { name: o.name, phone: o.phone, address: o.address },
+      deliveryFee: o.fee,
+      deliveryDate: addDays(today, o.days),
+      items: o.itemDefs.map(([pid, qty]) => {
+        const p = db.products.find((x) => x.id === pid);
+        return {
+          productId: pid, name: p.name, unitPrice: p.price, unitCost: p.cost,
+          qty, discount: 0, promoName: null,
+        };
+      }),
+    });
   }
 }
 
@@ -219,15 +274,26 @@ function saleDiscount(sale) {
   return sale.items.reduce((s, it) => s + (it.discount || 0), 0);
 }
 function saleTotal(sale) {
-  return saleSubtotal(sale) - saleDiscount(sale);
+  return saleSubtotal(sale) - saleDiscount(sale) + (sale.deliveryFee || 0);
 }
+/* A taxa de entrega não entra no lucro: assume-se que cobre o deslocamento. */
 function saleProfit(sale) {
   return sale.items.reduce(
     (s, it) => s + (it.unitPrice - (it.unitCost || 0)) * it.qty - (it.discount || 0), 0);
 }
 
+/* Data em que a venda conta para os relatórios: encomendas contam no dia
+   da entrega; balcão e delivery, no dia da venda. */
+function saleDate(sale) {
+  return (sale.channel === "encomenda" && sale.deliveryDate) ? sale.deliveryDate : sale.dateISO;
+}
+
 function validSales() {
   return db.sales.filter((s) => s.status === "ok");
+}
+
+function pendingOrders() {
+  return db.sales.filter((s) => s.status === "pendente");
 }
 
 /* Vendas do período: últimos `days` dias incluindo hoje (0 = tudo). */
@@ -235,7 +301,7 @@ function salesInRange(days, endISO = todayISO()) {
   const sales = validSales();
   if (!days) return sales;
   const startISO = addDays(endISO, -(days - 1));
-  return sales.filter((s) => s.dateISO >= startISO && s.dateISO <= endISO);
+  return sales.filter((s) => saleDate(s) >= startISO && saleDate(s) <= endISO);
 }
 
 function soldUnitsByProduct(days) {
@@ -252,7 +318,8 @@ function soldUnitsByProduct(days) {
 
 const state = {
   rangeDays: 30,
-  cart: [],          // [{productId, qty}]
+  cart: [],          // carrinho do balcão: [{productId, qty}]
+  shopCart: [],      // carrinho da loja (cliente): [{productId, qty}]
   editingProductId: null,
   editingPromoId: null,
 };
@@ -303,6 +370,7 @@ function renderDashboard() {
   renderTopProducts();
   renderWeekdayChart();
   renderPaymentChart();
+  renderChannelChart();
 }
 
 function periodTotals(sales) {
@@ -357,6 +425,17 @@ function renderKPIs() {
     }
     row.append(tile);
   }
+
+  // Encomendas abertas: independem do filtro de período — são trabalho futuro.
+  const pending = pendingOrders();
+  const pendingValue = pending.reduce((a, s) => a + saleTotal(s), 0);
+  row.append(el("div", { class: "kpi" }, [
+    el("div", { class: "label" }, "Encomendas abertas"),
+    el("div", { class: "value" }, fmtInt(pending.length)),
+    el("div", { class: "delta" }, pending.length
+      ? `${fmtMoney(pendingValue)} a receber`
+      : "nenhuma pendente"),
+  ]));
 }
 
 /* ----- Receita por dia (linha + crosshair) ----- */
@@ -366,9 +445,10 @@ function dailySeries(days) {
   const points = [];
   const byDay = {};
   for (const s of salesInRange(effective)) {
-    if (!byDay[s.dateISO]) byDay[s.dateISO] = { revenue: 0, count: 0 };
-    byDay[s.dateISO].revenue += saleTotal(s);
-    byDay[s.dateISO].count += 1;
+    const day = saleDate(s);
+    if (!byDay[day]) byDay[day] = { revenue: 0, count: 0 };
+    byDay[day].revenue += saleTotal(s);
+    byDay[day].count += 1;
   }
   for (let back = effective - 1; back >= 0; back--) {
     const iso = addDays(todayISO(), -back);
@@ -557,7 +637,7 @@ function renderTopProducts() {
 function weekdayUnits(days) {
   const totals = [0, 0, 0, 0, 0, 0, 0];
   for (const sale of salesInRange(days)) {
-    const idx = (parseISODate(sale.dateISO).getDay() + 6) % 7;
+    const idx = (parseISODate(saleDate(sale)).getDay() + 6) % 7;
     totals[idx] += sale.items.reduce((a, it) => a + it.qty, 0);
   }
   return totals;
@@ -594,35 +674,40 @@ function renderWeekdayChart() {
   ));
 }
 
-/* ----- Formas de pagamento (barra empilhada + legenda) ----- */
+/* ----- Barras de participação (pagamento e canais) ----- */
 
 const PAYMENT_SLOTS = [
   { name: "Pix", varName: "--series-1" },
   { name: "Cartão", varName: "--series-2" },
   { name: "Dinheiro", varName: "--series-3" },
+  { name: "A combinar", varName: "--series-4" },
 ];
 
-function renderPaymentChart() {
-  const container = document.getElementById("payment-chart");
-  container.textContent = "";
+const CHANNEL_SLOTS = [
+  { name: "Balcão", varName: "--series-1" },
+  { name: "Delivery", varName: "--series-2" },
+  { name: "Encomenda", varName: "--series-3" },
+];
 
-  const byMethod = { Pix: 0, "Cartão": 0, Dinheiro: 0 };
-  for (const sale of salesInRange(state.rangeDays)) {
-    byMethod[sale.payment] = (byMethod[sale.payment] || 0) + saleTotal(sale);
-  }
-  const total = Object.values(byMethod).reduce((a, b) => a + b, 0);
+/* Barra empilhada de participação na receita, com legenda e visão em tabela. */
+function renderShareChart({ chartId, tableId, slots, totals, ariaLabel, tableHeader }) {
+  const container = document.getElementById(chartId);
+  const tableWrap = document.getElementById(tableId);
+  container.textContent = "";
+  tableWrap.textContent = "";
+
+  const total = Object.values(totals).reduce((a, b) => a + b, 0);
   if (!total) {
     container.append(el("p", { class: "empty-msg" }, "Sem vendas no período."));
-    document.getElementById("payment-table").textContent = "";
     return;
   }
 
   const styles = getComputedStyle(document.documentElement);
-  const bar = el("div", { class: "stack-bar", role: "img", "aria-label": "Participação das formas de pagamento na receita" });
+  const bar = el("div", { class: "stack-bar", role: "img", "aria-label": ariaLabel });
   const legend = el("div", { class: "legend" });
 
-  for (const slot of PAYMENT_SLOTS) {
-    const value = byMethod[slot.name] || 0;
+  for (const slot of slots) {
+    const value = totals[slot.name] || 0;
     if (!value) continue;
     const color = styles.getPropertyValue(slot.varName).trim();
     const pct = (value / total) * 100;
@@ -641,33 +726,78 @@ function renderPaymentChart() {
     ]));
   }
   container.append(bar, legend);
-
-  const tableWrap = document.getElementById("payment-table");
-  tableWrap.textContent = "";
   tableWrap.append(miniTable(
-    ["Forma", "Receita"],
-    PAYMENT_SLOTS.filter((s) => byMethod[s.name]).map((s) => [s.name, fmtMoney(byMethod[s.name])]),
+    [tableHeader, "Receita"],
+    slots.filter((s) => totals[s.name]).map((s) => [s.name, fmtMoney(totals[s.name])]),
   ));
+}
+
+function renderPaymentChart() {
+  const totals = {};
+  for (const sale of salesInRange(state.rangeDays)) {
+    totals[sale.payment] = (totals[sale.payment] || 0) + saleTotal(sale);
+  }
+  renderShareChart({
+    chartId: "payment-chart", tableId: "payment-table",
+    slots: PAYMENT_SLOTS, totals,
+    ariaLabel: "Participação das formas de pagamento na receita",
+    tableHeader: "Forma",
+  });
+}
+
+function renderChannelChart() {
+  const totals = {};
+  for (const sale of salesInRange(state.rangeDays)) {
+    const label = CHANNEL_LABELS[sale.channel || "balcao"];
+    totals[label] = (totals[label] || 0) + saleTotal(sale);
+  }
+  renderShareChart({
+    chartId: "channel-chart", tableId: "channel-table",
+    slots: CHANNEL_SLOTS, totals,
+    ariaLabel: "Participação dos canais de venda na receita",
+    tableHeader: "Canal",
+  });
 }
 
 /* ============================================================
    VENDAS (carrinho + histórico)
    ============================================================ */
 
+function currentChannel() {
+  return document.querySelector('input[name="channel"]:checked')?.value || "balcao";
+}
+
+/* Mostra/esconde os campos de cliente conforme o canal escolhido. */
+function updateSaleFormUI() {
+  const channel = currentChannel();
+  document.getElementById("customer-fields").hidden = channel === "balcao";
+  document.getElementById("due-date-row").hidden = channel !== "encomenda";
+  document.getElementById("btn-confirm-sale").textContent =
+    channel === "encomenda" ? "Registrar encomenda" : "Confirmar venda";
+  const due = document.getElementById("sale-due-date");
+  due.min = todayISO();
+  if (!due.value || due.value < todayISO()) due.value = addDays(todayISO(), 1);
+  renderSaleProductSelect();
+  renderCart();
+}
+
 function renderSaleProductSelect() {
   const select = document.getElementById("sale-product");
+  // Encomenda é produção sob demanda: sabores esgotados podem ser encomendados.
+  const orderMode = currentChannel() === "encomenda";
   select.textContent = "";
-  const available = db.products.filter((p) => p.stock > 0);
-  if (!available.length) {
-    select.append(el("option", { value: "" }, "Nenhum produto com estoque"));
+  const sellable = orderMode ? db.products : db.products.filter((p) => p.stock > 0);
+  if (!sellable.length) {
+    select.append(el("option", { value: "" },
+      orderMode ? "Nenhum produto cadastrado" : "Nenhum produto com estoque"));
     select.disabled = true;
     return;
   }
   select.disabled = false;
   for (const p of [...db.products].sort((a, b) => a.name.localeCompare(b.name))) {
-    const opt = el("option", { value: p.id },
-      `${p.name} — ${fmtMoney(p.price)}${p.stock === 0 ? " (sem estoque)" : ""}`);
-    if (p.stock === 0) opt.disabled = true;
+    const suffix = p.stock === 0 ? (orderMode ? " (produzir)" : " (sem estoque)") : "";
+    const opt = el("option", { value: p.id }, `${p.name} — ${fmtMoney(p.price)}${suffix}`);
+    if (p.stock === 0 && !orderMode) opt.disabled = true;
     select.append(opt);
   }
 }
@@ -717,9 +847,14 @@ function renderCart() {
     ]));
   }
 
+  const fee = currentChannel() === "balcao"
+    ? 0
+    : Math.max(0, Number(document.getElementById("sale-fee").value) || 0);
+  document.getElementById("fee-line").hidden = fee <= 0;
+  document.getElementById("cart-fee").textContent = fmtMoney(fee);
   document.getElementById("cart-subtotal").textContent = fmtMoney(subtotal);
   document.getElementById("cart-discount").textContent = discount ? "−" + fmtMoney(discount) : fmtMoney(0);
-  document.getElementById("cart-total").textContent = fmtMoney(subtotal - discount);
+  document.getElementById("cart-total").textContent = fmtMoney(subtotal - discount + fee);
   document.getElementById("btn-confirm-sale").disabled = lines.length === 0;
 }
 
@@ -733,7 +868,8 @@ function addToCart() {
 
   const inCart = state.cart.find((c) => c.productId === productId);
   const already = inCart ? inCart.qty : 0;
-  if (already + qty > product.stock) {
+  // Encomenda é produzida para a data: não depende do estoque pronto.
+  if (currentChannel() !== "encomenda" && already + qty > product.stock) {
     toast(`Estoque insuficiente: restam ${product.stock - already} pote(s) de ${product.name}.`);
     return;
   }
@@ -746,12 +882,36 @@ function addToCart() {
 function confirmSale() {
   const lines = cartLines();
   if (!lines.length) return;
-  for (const line of lines) {
-    if (line.qty > line.product.stock) {
-      toast(`Estoque insuficiente de ${line.product.name}.`);
-      return;
+
+  const channel = currentChannel();
+  const customer = {
+    name: document.getElementById("sale-customer").value.trim(),
+    phone: document.getElementById("sale-phone").value.trim(),
+    address: document.getElementById("sale-address").value.trim(),
+  };
+  const fee = channel === "balcao"
+    ? 0
+    : Math.max(0, Number(document.getElementById("sale-fee").value) || 0);
+  const dueDate = document.getElementById("sale-due-date").value;
+
+  if (channel === "delivery" && (!customer.name || !customer.address)) {
+    toast("Informe o cliente e o endereço de entrega do delivery.");
+    return;
+  }
+  if (channel === "encomenda") {
+    if (!customer.name) { toast("Informe o nome do cliente da encomenda."); return; }
+    if (!dueDate) { toast("Informe a data de entrega da encomenda."); return; }
+    if (dueDate < todayISO()) { toast("A data de entrega não pode estar no passado."); return; }
+  }
+  if (channel !== "encomenda") {
+    for (const line of lines) {
+      if (line.qty > line.product.stock) {
+        toast(`Estoque insuficiente de ${line.product.name}.`);
+        return;
+      }
     }
   }
+
   const payment = document.querySelector('input[name="payment"]:checked').value;
   const now = new Date();
   const sale = {
@@ -759,7 +919,11 @@ function confirmSale() {
     dateISO: todayISO(),
     time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
     payment,
-    status: "ok",
+    status: channel === "encomenda" ? "pendente" : "ok",
+    channel,
+    customer: channel === "balcao" ? null : customer,
+    deliveryFee: fee,
+    deliveryDate: channel === "encomenda" ? dueDate : null,
     items: lines.map((line) => ({
       productId: line.product.id,
       name: line.product.name,
@@ -770,26 +934,86 @@ function confirmSale() {
       promoName: line.promoName,
     })),
   };
-  for (const line of lines) line.product.stock -= line.qty;
+  // Encomenda não baixa o estoque pronto: os potes serão produzidos para a data.
+  if (channel !== "encomenda") {
+    for (const line of lines) line.product.stock -= line.qty;
+  }
   db.sales.push(sale);
   state.cart = [];
+  for (const id of ["sale-customer", "sale-phone", "sale-address"]) {
+    document.getElementById(id).value = "";
+  }
+  document.getElementById("sale-fee").value = 0;
   saveDB();
   renderAll();
-  toast(`Venda registrada: ${fmtMoney(saleTotal(sale))} no ${payment}.`);
+  toast(channel === "encomenda"
+    ? `Encomenda de ${customer.name} registrada para ${fmtDateBR(dueDate)}.`
+    : `Venda registrada: ${fmtMoney(saleTotal(sale))} no ${payment}.`);
+}
+
+function concludeOrder(saleId) {
+  const sale = db.sales.find((s) => s.id === saleId);
+  if (!sale || sale.status !== "pendente") return;
+  sale.status = "ok";
+  // Entrega antecipada conta como receita de hoje.
+  if (sale.deliveryDate > todayISO()) sale.deliveryDate = todayISO();
+  saveDB();
+  renderAll();
+  toast(`Encomenda de ${sale.customer?.name || "cliente"} concluída e somada às vendas.`);
 }
 
 function cancelSale(saleId) {
   const sale = db.sales.find((s) => s.id === saleId);
   if (!sale || sale.status === "cancelled") return;
-  if (!confirm("Cancelar esta venda? O estoque dos itens será devolvido.")) return;
+  const isOrder = sale.channel === "encomenda";
+  const msg = isOrder
+    ? "Cancelar esta encomenda?"
+    : "Cancelar esta venda? O estoque dos itens será devolvido.";
+  if (!confirm(msg)) return;
   sale.status = "cancelled";
-  for (const it of sale.items) {
-    const product = db.products.find((p) => p.id === it.productId);
-    if (product) product.stock += it.qty;
+  // Encomendas nunca baixaram o estoque pronto, então nada a devolver.
+  if (!isOrder) {
+    for (const it of sale.items) {
+      const product = db.products.find((p) => p.id === it.productId);
+      if (product) product.stock += it.qty;
+    }
   }
   saveDB();
   renderAll();
-  toast("Venda cancelada e estoque devolvido.");
+  toast(isOrder ? "Encomenda cancelada." : "Venda cancelada e estoque devolvido.");
+}
+
+function renderOrders() {
+  const tbody = document.querySelector("#orders-table tbody");
+  tbody.textContent = "";
+  const orders = pendingOrders()
+    .sort((a, b) => (a.deliveryDate || "").localeCompare(b.deliveryDate || ""));
+  if (!orders.length) {
+    tbody.append(el("tr", {}, el("td", { colspan: "7", class: "empty-msg" },
+      "Nenhuma encomenda aberta. Registre uma escolhendo o canal \"Encomenda\" na nova venda.")));
+    return;
+  }
+  const today = todayISO();
+  for (const o of orders) {
+    let badge;
+    if (o.deliveryDate < today) badge = el("span", { class: "badge critical" }, "Atrasada");
+    else if (o.deliveryDate === today) badge = el("span", { class: "badge warning" }, "Hoje");
+    else badge = el("span", { class: "badge neutral" }, "Agendada");
+    const contact = [o.customer?.phone, o.customer?.address].filter(Boolean).join(" · ") || "—";
+    tbody.append(el("tr", {}, [
+      el("td", {}, fmtDateBR(o.deliveryDate)),
+      el("td", {}, o.customer?.name || "—"),
+      el("td", {}, o.items.map((it) => `${it.qty}× ${it.name}`).join(", ")),
+      el("td", {}, contact),
+      el("td", { class: "num" }, fmtMoney(saleTotal(o))),
+      el("td", {}, badge),
+      el("td", {}, [
+        el("button", { class: "btn small", onclick: () => concludeOrder(o.id) }, "Concluir"),
+        " ",
+        el("button", { class: "btn small ghost danger-text", onclick: () => cancelSale(o.id) }, "Cancelar"),
+      ]),
+    ]));
+  }
 }
 
 function renderSalesTable() {
@@ -804,16 +1028,28 @@ function renderSalesTable() {
   }
   for (const sale of sales) {
     const itemsText = sale.items.map((it) => `${it.qty}× ${it.name}`).join(", ");
-    const discount = saleDiscount(sale);
+    const channel = sale.channel || "balcao";
+
+    const channelCell = el("td", {}, CHANNEL_LABELS[channel]);
+    if (sale.customer?.name) {
+      channelCell.append(el("span", { class: "cell-sub" }, sale.customer.name));
+    }
+    if (channel === "encomenda" && sale.deliveryDate) {
+      channelCell.append(el("span", { class: "cell-sub" }, "entrega " + fmtDateBR(sale.deliveryDate)));
+    }
+
+    let statusBadge;
+    if (sale.status === "cancelled") statusBadge = el("span", { class: "badge critical" }, "Cancelada");
+    else if (sale.status === "pendente") statusBadge = el("span", { class: "badge warning" }, "Pendente");
+    else statusBadge = el("span", { class: "badge good" }, "Concluída");
+
     const row = el("tr", { class: sale.status === "cancelled" ? "sale-cancelled" : "" }, [
       el("td", {}, `${fmtDateBR(sale.dateISO)} ${sale.time || ""}`),
+      channelCell,
       el("td", {}, itemsText),
       el("td", {}, sale.payment),
-      el("td", { class: "num" }, discount ? "−" + fmtMoney(discount) : "—"),
       el("td", { class: "num" }, fmtMoney(saleTotal(sale))),
-      el("td", {}, sale.status === "cancelled"
-        ? el("span", { class: "badge critical" }, "Cancelada")
-        : el("span", { class: "badge good" }, "Concluída")),
+      el("td", {}, statusBadge),
       el("td", {}, sale.status === "ok"
         ? el("button", { class: "btn small ghost danger-text", onclick: () => cancelSale(sale.id) }, "Cancelar")
         : ""),
@@ -823,17 +1059,22 @@ function renderSalesTable() {
 }
 
 function exportSalesCSV() {
-  const header = "data;hora;status;pagamento;itens;subtotal;desconto;total\n";
+  const header = "data;hora;status;canal;cliente;entrega;pagamento;itens;subtotal;desconto;taxa_entrega;total\n";
   const escapeCSV = (s) => `"${String(s).replaceAll('"', '""')}"`;
   const body = db.sales.map((s) => [
-    s.dateISO, s.time || "", s.status, s.payment,
+    s.dateISO, s.time || "", s.status,
+    CHANNEL_LABELS[s.channel || "balcao"],
+    escapeCSV(s.customer?.name || ""),
+    s.deliveryDate || "",
+    s.payment,
     escapeCSV(s.items.map((it) => `${it.qty}x ${it.name}`).join(", ")),
     saleSubtotal(s).toFixed(2).replace(".", ","),
     saleDiscount(s).toFixed(2).replace(".", ","),
+    (s.deliveryFee || 0).toFixed(2).replace(".", ","),
     saleTotal(s).toFixed(2).replace(".", ","),
   ].join(";")).join("\n");
   const blob = new Blob(["﻿" + header + body], { type: "text/csv;charset=utf-8" });
-  const a = el("a", { href: URL.createObjectURL(blob), download: `vendas-doce-pote-${todayISO()}.csv` });
+  const a = el("a", { href: URL.createObjectURL(blob), download: `vendas-bolos-da-bru-${todayISO()}.csv` });
   document.body.append(a);
   a.click();
   a.remove();
@@ -1048,6 +1289,25 @@ function computeTips() {
   const sold30 = soldUnitsByProduct(30);
   const sales30 = salesInRange(30);
 
+  // 0. Encomendas: atrasadas e as dos próximos dias
+  const pending = pendingOrders();
+  for (const o of pending.filter((s) => s.deliveryDate < todayISO())) {
+    tips.push({
+      level: "critical", icon: "⏰",
+      title: `Encomenda de ${o.customer?.name || "cliente"} está atrasada`,
+      text: `A entrega era ${fmtDateBR(o.deliveryDate)} (${fmtMoney(saleTotal(o))}). Fale com o cliente pelo contato cadastrado e reagende, ou conclua no painel "Encomendas abertas".`,
+    });
+  }
+  const soon = pending.filter((s) => s.deliveryDate >= todayISO() && s.deliveryDate <= addDays(todayISO(), 2));
+  if (soon.length) {
+    const potes = soon.reduce((a, s) => a + s.items.reduce((x, it) => x + it.qty, 0), 0);
+    tips.push({
+      level: "warning", icon: "🗓️",
+      title: `${soon.length} encomenda(s) para os próximos 2 dias`,
+      text: `São ${fmtInt(potes)} pote(s) no total. Confira os sabores no painel "Encomendas abertas" e organize a produção com antecedência.`,
+    });
+  }
+
   // 1. Estoque
   const out = db.products.filter((p) => p.stock === 0);
   const low = db.products.filter((p) => p.stock > 0 && p.stock <= 5);
@@ -1147,6 +1407,17 @@ function computeTips() {
     });
   }
 
+  // 9. Delivery
+  const deliveryRevenue = sales30
+    .filter((s) => (s.channel || "balcao") === "delivery")
+    .reduce((a, s) => a + saleTotal(s), 0);
+  if (totalRevenue30 > 0 && deliveryRevenue / totalRevenue30 < 0.15) {
+    tips.push({
+      level: "info", icon: "🛵", title: "O delivery ainda é pequeno nas suas vendas",
+      text: "Menos de 15% da receita vem de entregas. Divulgue a aba Loja nos stories e no status do WhatsApp com um horário fixo de entregas — pedido entregue em casa vira cliente recorrente.",
+    });
+  }
+
   if (!tips.length) {
     tips.push({
       level: "good", icon: "✅", title: "Tudo em ordem por aqui",
@@ -1160,8 +1431,8 @@ const ROADMAP = [
   { icon: "👤", title: "Cadastro de clientes e fidelidade", text: "Registre nome e WhatsApp de quem compra. Um cartão fidelidade simples (a cada 10 potes, 1 grátis) aumenta a recompra — e a lista de contatos vira canal de divulgação de novos sabores." },
   { icon: "📲", title: "Pedidos pelo WhatsApp com link do catálogo", text: "Divulgue um catálogo com fotos e preços e receba pedidos por mensagem. Registre-os aqui na aba Vendas para manter o histórico completo." },
   { icon: "🧾", title: "Controle de insumos e validade", text: "Hoje o sistema controla potes prontos. O próximo passo é controlar ingredientes (leite condensado, creme de leite, embalagens) e datas de validade dos lotes produzidos." },
-  { icon: "☁️", title: "Backup dos dados", text: "Os dados vivem apenas neste navegador. Exporte o CSV de vendas toda semana e guarde numa nuvem (Drive/Dropbox). Uma evolução natural é sincronizar com um banco de dados on-line." },
-  { icon: "🚚", title: "Taxa e zona de entrega", text: "Se você entrega, registre a taxa por bairro e o custo do deslocamento para saber se a entrega está dando lucro de verdade." },
+  { icon: "☁️", title: "Loja on-line de verdade (com servidor)", text: "Hoje a aba Loja funciona neste navegador e os pedidos de fora chegam pelo WhatsApp. O próximo passo é hospedar a loja com um banco de dados on-line, para o pedido do cliente cair aqui sozinho, de qualquer lugar." },
+  { icon: "🗺️", title: "Zonas de entrega com taxa automática", text: "A taxa de entrega hoje é digitada a cada venda. Evolua para uma tabela de bairros com taxa e tempo estimado — menos erro e mais transparência para o cliente." },
   { icon: "📈", title: "Metas mensais", text: "Defina uma meta de receita por mês e acompanhe pelo dashboard. Meta visível muda comportamento: fica claro quando vale fazer uma promoção para fechar o mês." },
 ];
 
@@ -1185,6 +1456,173 @@ function renderTips() {
 }
 
 /* ============================================================
+   LOJA (visão do cliente)
+   Pedidos feitos aqui entram como encomendas pendentes no painel
+   "Encomendas abertas" da aba Vendas.
+   ============================================================ */
+
+function shopCartLines() {
+  // Descarta itens de produtos que foram excluídos do catálogo.
+  state.shopCart = state.shopCart.filter((e) => db.products.some((p) => p.id === e.productId));
+  return state.shopCart.map((entry) => {
+    const product = db.products.find((p) => p.id === entry.productId);
+    const promo = bestPromoFor(product.id, product.price);
+    const discount = promo ? Math.round(promo.discountPerUnit * entry.qty * 100) / 100 : 0;
+    return {
+      product, qty: entry.qty, discount,
+      promoName: promo?.name || null,
+      subtotal: product.price * entry.qty - discount,
+    };
+  });
+}
+
+function shopAdd(productId, delta) {
+  const entry = state.shopCart.find((e) => e.productId === productId);
+  if (entry) {
+    entry.qty += delta;
+    if (entry.qty <= 0) state.shopCart = state.shopCart.filter((e) => e !== entry);
+  } else if (delta > 0) {
+    state.shopCart.push({ productId, qty: delta });
+  }
+  renderShop();
+}
+
+function renderShop() {
+  const grid = document.getElementById("shop-grid");
+  const cartBox = document.getElementById("shop-cart");
+  grid.textContent = "";
+  cartBox.textContent = "";
+
+  const lines = shopCartLines();
+  const qtyOf = (id) => lines.find((l) => l.product.id === id)?.qty || 0;
+
+  if (!db.products.length) {
+    grid.append(el("p", { class: "empty-msg" }, "O cardápio está sendo preparado. Volte em breve!"));
+  }
+  for (const p of [...db.products].sort((a, b) => a.name.localeCompare(b.name))) {
+    const promo = bestPromoFor(p.id, p.price);
+    const priceLine = el("div", { class: "shop-price" });
+    if (promo) {
+      priceLine.append(
+        el("s", {}, fmtMoney(p.price)), " ",
+        el("strong", {}, fmtMoney(p.price - promo.discountPerUnit)),
+        el("span", { class: "promo-tag" }, `🏷 ${promo.name}`),
+      );
+    } else {
+      priceLine.append(el("strong", {}, fmtMoney(p.price)));
+    }
+    const qty = qtyOf(p.id);
+    grid.append(el("div", { class: "shop-item" }, [
+      el("div", { class: "shop-item-info" }, [
+        el("h3", {}, p.name),
+        priceLine,
+        p.stock > 0
+          ? el("span", { class: "badge good" }, "pronta entrega")
+          : el("span", { class: "badge neutral" }, "sob encomenda"),
+      ]),
+      el("div", { class: "shop-stepper" }, [
+        el("button", {
+          type: "button", class: "btn small step", "aria-label": `Tirar um pote de ${p.name}`,
+          onclick: () => shopAdd(p.id, -1),
+        }, "−"),
+        el("span", { class: "shop-qty", "aria-live": "polite" }, fmtInt(qty)),
+        el("button", {
+          type: "button", class: "btn small step", "aria-label": `Adicionar um pote de ${p.name}`,
+          onclick: () => shopAdd(p.id, 1),
+        }, "+"),
+      ]),
+    ]));
+  }
+
+  let total = 0;
+  if (!lines.length) {
+    cartBox.append(el("p", { class: "empty-msg" }, "Escolha seus sabores no cardápio ao lado."));
+  } else {
+    for (const line of lines) {
+      total += line.subtotal;
+      cartBox.append(el("div", { class: "shop-cart-row" }, [
+        el("span", {}, `${fmtInt(line.qty)}× ${line.product.name}`),
+        el("strong", {}, fmtMoney(line.subtotal)),
+      ]));
+    }
+  }
+  document.getElementById("shop-total").textContent = fmtMoney(total);
+
+  const dateInput = document.getElementById("shop-date");
+  dateInput.min = todayISO();
+  if (!dateInput.value || dateInput.value < todayISO()) dateInput.value = addDays(todayISO(), 1);
+}
+
+function submitShopOrder(ev) {
+  ev.preventDefault();
+  const lines = shopCartLines();
+  const name = document.getElementById("shop-name").value.trim();
+  const phone = document.getElementById("shop-phone").value.trim();
+  const wantsDelivery = document.querySelector('input[name="shop-fulfil"]:checked').value === "entrega";
+  const address = document.getElementById("shop-address").value.trim();
+  const dueDate = document.getElementById("shop-date").value;
+
+  if (!lines.length) { toast("Escolha ao menos um sabor no cardápio."); return; }
+  if (!name || !phone) { toast("Informe seu nome e telefone para combinarmos a entrega."); return; }
+  if (wantsDelivery && !address) { toast("Informe o endereço de entrega."); return; }
+  if (!dueDate || dueDate < todayISO()) { toast("Escolha uma data válida para o pedido."); return; }
+
+  const now = new Date();
+  const sale = {
+    id: uid(),
+    dateISO: todayISO(),
+    time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+    payment: "A combinar",
+    status: "pendente",
+    channel: "encomenda",
+    customer: { name, phone, address: wantsDelivery ? address : "" },
+    deliveryFee: 0,
+    deliveryDate: dueDate,
+    items: lines.map((line) => ({
+      productId: line.product.id,
+      name: line.product.name,
+      unitPrice: line.product.price,
+      unitCost: line.product.cost,
+      qty: line.qty,
+      discount: line.discount,
+      promoName: line.promoName,
+    })),
+  };
+  db.sales.push(sale);
+  state.shopCart = [];
+  saveDB();
+
+  // Resumo para o cliente mandar no WhatsApp da loja.
+  const summary = [
+    "Olá! Acabei de fazer um pedido na loja Bolos da Bru 🍰",
+    ...sale.items.map((it) => `• ${it.qty}× ${it.name}`),
+    `Total: ${fmtMoney(saleTotal(sale))}`,
+    `Para: ${fmtDateBR(dueDate)} (${wantsDelivery ? "entrega em " + address : "retirada"})`,
+    `Nome: ${name} — ${phone}`,
+  ].join("\n");
+
+  renderAll();
+  document.getElementById("shop-form").reset();
+  const confirmation = document.getElementById("shop-confirmation");
+  confirmation.textContent = "";
+  confirmation.hidden = false;
+  confirmation.append(
+    el("div", { class: "tip good" }, [
+      el("span", { class: "tip-icon" }, "🎉"),
+      el("div", {}, [
+        el("h3", {}, "Pedido enviado!"),
+        el("p", {}, `Obrigada, ${name}! Seu pedido para ${fmtDateBR(dueDate)} entrou na fila de produção. Se quiser agilizar, mande o resumo no nosso WhatsApp:`),
+        el("a", {
+          class: "btn", target: "_blank", rel: "noopener",
+          href: `https://wa.me/${db.settings.whatsapp || ""}?text=` + encodeURIComponent(summary),
+        }, "Enviar resumo no WhatsApp"),
+      ]),
+    ]),
+  );
+  toast("Pedido registrado! Ele já aparece nas encomendas abertas.");
+}
+
+/* ============================================================
    Navegação, eventos e inicialização
    ============================================================ */
 
@@ -1200,14 +1638,18 @@ function switchView(view) {
 }
 
 function renderAll() {
+  const isEmpty = !db.products.length && !db.sales.length;
+  document.getElementById("welcome-banner").hidden = !isEmpty;
   renderDashboard();
   renderSaleProductSelect();
   renderCart();
   renderSalesTable();
+  renderOrders();
   renderProductsTable();
   renderPromoProductSelect();
   renderPromosTable();
   renderTips();
+  renderShop();
 }
 
 function bindEvents() {
@@ -1228,19 +1670,50 @@ function bindEvents() {
   document.getElementById("btn-confirm-sale").addEventListener("click", confirmSale);
   document.getElementById("btn-export-csv").addEventListener("click", exportSalesCSV);
 
+  document.querySelectorAll('input[name="channel"]').forEach((radio) => {
+    radio.addEventListener("change", updateSaleFormUI);
+  });
+  document.getElementById("sale-fee").addEventListener("input", renderCart);
+
+  document.getElementById("shop-form").addEventListener("submit", submitShopOrder);
+  document.querySelectorAll('input[name="shop-fulfil"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const wantsDelivery = document.querySelector('input[name="shop-fulfil"]:checked').value === "entrega";
+      document.getElementById("shop-address-field").hidden = !wantsDelivery;
+    });
+  });
+
   document.getElementById("product-form").addEventListener("submit", submitProductForm);
   document.getElementById("btn-cancel-edit").addEventListener("click", resetProductForm);
 
   document.getElementById("promo-form").addEventListener("submit", submitPromoForm);
   document.getElementById("btn-cancel-promo-edit").addEventListener("click", resetPromoForm);
 
-  document.getElementById("btn-reset-demo").addEventListener("click", () => {
-    if (!confirm("Substituir os dados atuais pelos dados de demonstração?")) return;
+  const loadDemo = (needsConfirm) => {
+    if (needsConfirm && (db.products.length || db.sales.length)
+        && !confirm("Substituir os dados atuais pelos dados de exemplo?")) return;
     seedDemoData();
     saveDB();
     state.cart = [];
+    state.shopCart = [];
     renderAll();
-    toast("Dados de demonstração restaurados.");
+    toast("Dados de exemplo carregados. Para usar de verdade, apague-os na aba Dicas.");
+  };
+  document.getElementById("btn-load-demo").addEventListener("click", () => loadDemo(false));
+  document.getElementById("btn-reset-demo").addEventListener("click", () => loadDemo(true));
+  document.getElementById("btn-goto-products").addEventListener("click", () => {
+    switchView("produtos");
+    document.getElementById("product-name").focus();
+  });
+
+  document.getElementById("btn-save-config").addEventListener("click", () => {
+    const digits = document.getElementById("cfg-whatsapp").value.replace(/\D/g, "");
+    db.settings.whatsapp = digits;
+    document.getElementById("cfg-whatsapp").value = digits;
+    saveDB();
+    toast(digits
+      ? "WhatsApp da loja salvo. Os pedidos da Loja agora chegam no seu número."
+      : "WhatsApp removido das configurações.");
   });
   document.getElementById("btn-clear-data").addEventListener("click", () => {
     if (!confirm("Apagar TODOS os produtos, vendas e promoções? Essa ação não tem volta.")) return;
@@ -1259,4 +1732,6 @@ function bindEvents() {
 loadDB();
 bindEvents();
 resetPromoForm();
+updateSaleFormUI();
+document.getElementById("cfg-whatsapp").value = db.settings.whatsapp || "";
 renderAll();

@@ -23,7 +23,7 @@ Sou Analista de Testes (QA) com mais de 2 anos de experiência em projetos corpo
 
 ## 📂 Estrutura do Portfólio
 
-- **bolo-no-pote/** → 🍰 Sistema web de gestão de vendas de bolo no pote (dashboard, vendas, produtos, promoções e dicas)
+- **bolos-da-bru/** → 🍰 Bolos da Bru: sistema de gestão de vendas de bolo no pote (dashboard, balcão/delivery/encomendas, loja on-line, promoções e dicas)
 - **manual-tests/** → Casos de teste, planos e relatórios de bugs
 - **automation-cypress/** → Projeto de automação com Cypress
 - **api-tests/** → Coleções e exemplos de testes de API
