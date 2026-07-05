@@ -1,7 +1,5 @@
 # QA Portfolio — Guilherme Hansen Gonçalves
 
-[![Testes E2E](https://github.com/GhansenGoncalves/portifolioGHG/actions/workflows/tests.yml/badge.svg)](https://github.com/GhansenGoncalves/portifolioGHG/actions/workflows/tests.yml)
-
 Analista de Testes (QA) com mais de 2 anos de experiência em projetos
 corporativos e governamentais, atuando com testes manuais, exploratórios,
 regressão e automação com Cypress e Playwright.
@@ -19,15 +17,14 @@ os links atualizados em **[github.com/ghansengoncalves](https://github.com/ghans
 
 | Repositório | Conteúdo |
 |---|---|
-| [`bolos-da-bru`](https://github.com/ghansengoncalves/bolos-da-bru) | Sistema de gestão de vendas com suíte E2E (Playwright), agora publicado em [ghansengoncalves.github.io/bolos-da-bru](https://ghansengoncalves.github.io/bolos-da-bru/) |
+| [`bolos-da-bru`](https://github.com/ghansengoncalves/bolos-da-bru) | Sistema de gestão de vendas com suíte E2E (Playwright), publicado em [ghansengoncalves.github.io/bolos-da-bru](https://ghansengoncalves.github.io/bolos-da-bru/) |
 | [`automation-cypress`](https://github.com/ghansengoncalves/automation-cypress) | Automação E2E com Cypress contra site público (SauceDemo) |
 | [`api-tests`](https://github.com/ghansengoncalves/api-tests) | Testes de API contra API pública (JSONPlaceholder) |
 | [`manual-tests`](https://github.com/ghansengoncalves/manual-tests) | Plano de teste, casos de teste e bug reports escritos manualmente |
 | [`studies-ctfl`](https://github.com/ghansengoncalves/studies-ctfl) | Resumos de estudo para a certificação ISTQB CTFL 4.0 |
 
-O conteúdo antigo permanece neste repositório por enquanto (o link
-`ghansengoncalves.github.io/portifolioGHG/bolos-da-bru/` continua no ar), mas
-toda atualização futura acontece nos repositórios novos acima.
+O conteúdo antigo foi removido deste repositório para evitar duas versões
+divergentes no ar; toda atualização acontece nos repositórios novos acima.
 
 ---
 
